@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"math"
 	"math/cmplx"
@@ -69,51 +70,14 @@ func SphericalSoftmax(k tc128.Continuation, node int, a *tc128.V, options ...map
 	return false
 }
 
-func main() {
-	rand.Seed(1)
-
-	symbols, prices, outputs := []string{"AAPL", "IBM", "CTVA", "K", "CAT", "GS", "T", "WMT"}, make([][]float32, 0, 8), make([][]complex128, 0, 8)
+// Original is the original code
+func Original() {
+	symbols, prices := []string{"AAPL", "IBM", "CTVA", "K", "CAT", "GS", "T", "WMT"}, make([][]float32, 0, 8)
 	for _, symbol := range symbols {
 		stock := Prices(symbol)
 		fmt.Println(symbol, len(stock))
 		prices = append(prices, stock)
-		input, max := make([]float64, len(stock)), 0.0
-		for i, v := range stock {
-			value := float64(v)
-			if value > max {
-				max = value
-			}
-			input[i] = value
-		}
-		for i := range input {
-			input[i] /= float64(max)
-		}
-		output := fft.FFTReal(input)
-		for i := range output {
-			output[i] /= complex(float64(len(output)), 0)
-		}
-		outputs = append(outputs, output)
 	}
-
-	width, length := len(outputs[0]), len(outputs)
-	others := tc128.NewSet()
-	others.Add("input", width, 1)
-	input := others.ByName["input"]
-	input.X = input.X[:cap(input.X)]
-
-	// Create the weight data matrix
-	x := tc128.NewSet()
-	x.Add("points", width, length)
-	point := x.ByName["points"]
-	for _, v := range outputs {
-		point.X = append(point.X, v...)
-	}
-
-	// The neural network is the attention model from attention is all you need
-	spherical := tc128.U(SphericalSoftmax)
-	al1 := spherical(tc128.Mul(x.Get("points"), others.Get("input")))
-	al2 := spherical(tc128.T(tc128.Mul(al1, tc128.T(x.Get("points")))))
-	acost := tc128.Entropy(al2)
 
 	size := len(prices[0]) + 1
 	set := tf32.NewSet()
@@ -243,30 +207,6 @@ func main() {
 		index++
 	}
 
-	type Stock struct {
-		Symbol  string
-		Entropy float64
-	}
-	stocks := make([]Stock, 0, len(symbols))
-	for i := 0; i < len(outputs); i++ {
-		// Load the input
-		copy(input.X, outputs[i])
-		// Calculate the l1 output of the neural network
-		acost(func(a *tc128.V) bool {
-			stocks = append(stocks, Stock{
-				Symbol:  symbols[i],
-				Entropy: cmplx.Abs(a.X[0]),
-			})
-			return true
-		})
-	}
-	sort.Slice(stocks, func(i, j int) bool {
-		return stocks[i].Entropy > stocks[j].Entropy
-	})
-	for _, stock := range stocks {
-		fmt.Printf("%4s %f\n", stock.Symbol, stock.Entropy)
-	}
-
 	p := plot.New()
 
 	p.Title.Text = "epochs vs cost"
@@ -284,6 +224,87 @@ func main() {
 	err = p.Save(8*vg.Inch, 8*vg.Inch, "epochs.png")
 	if err != nil {
 		panic(err)
+	}
+}
+
+var (
+	// Original is the original mode
+	FlagOriginal = flag.Bool("original", false, "original mode")
+)
+
+func main() {
+	flag.Parse()
+	rand.Seed(1)
+
+	if *FlagOriginal {
+		Original()
+		return
+	}
+
+	symbols, inputs := []string{"AAPL", "IBM", "CTVA", "K", "CAT", "GS", "T", "WMT"}, make([][]complex128, 0, 8)
+	for _, symbol := range symbols {
+		stock := Prices(symbol)
+		fmt.Println(symbol, len(stock))
+		input, max := make([]float64, len(stock)), 0.0
+		for i, v := range stock {
+			value := float64(v)
+			if value > max {
+				max = value
+			}
+			input[i] = value
+		}
+		for i := range input {
+			input[i] /= float64(max)
+		}
+		output := fft.FFTReal(input)
+		for i := range output {
+			output[i] /= complex(float64(len(output)), 0)
+		}
+		inputs = append(inputs, output)
+	}
+
+	width, length := len(inputs[0]), len(inputs)
+	others := tc128.NewSet()
+	others.Add("input", width, 1)
+	input := others.ByName["input"]
+	input.X = input.X[:cap(input.X)]
+
+	// Create the weight data matrix
+	x := tc128.NewSet()
+	x.Add("points", width, length)
+	point := x.ByName["points"]
+	for _, v := range inputs {
+		point.X = append(point.X, v...)
+	}
+
+	// The neural network is the attention model from attention is all you need
+	spherical := tc128.U(SphericalSoftmax)
+	l1 := spherical(tc128.Mul(x.Get("points"), others.Get("input")))
+	l2 := spherical(tc128.T(tc128.Mul(l1, tc128.T(x.Get("points")))))
+	cost := tc128.Entropy(l2)
+
+	type Stock struct {
+		Symbol  string
+		Entropy float64
+	}
+	stocks := make([]Stock, 0, len(symbols))
+	for i := 0; i < len(inputs); i++ {
+		// Load the input
+		copy(input.X, inputs[i])
+		// Calculate the l1 output of the neural network
+		cost(func(a *tc128.V) bool {
+			stocks = append(stocks, Stock{
+				Symbol:  symbols[i],
+				Entropy: cmplx.Abs(a.X[0]),
+			})
+			return true
+		})
+	}
+	sort.Slice(stocks, func(i, j int) bool {
+		return stocks[i].Entropy > stocks[j].Entropy
+	})
+	for _, stock := range stocks {
+		fmt.Printf("%4s %f\n", stock.Symbol, stock.Entropy)
 	}
 }
 
