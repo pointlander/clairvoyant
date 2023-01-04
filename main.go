@@ -13,6 +13,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/mjibson/go-dsp/fft"
 	"gonum.org/v1/plot"
 	"gonum.org/v1/plot/plotter"
 	"gonum.org/v1/plot/vg"
@@ -43,6 +44,22 @@ func main() {
 		stock := Prices(symbol)
 		fmt.Println(symbol, len(stock))
 		prices = append(prices, stock)
+		input, max := make([]float64, len(stock)), 0.0
+		for i, v := range stock {
+			value := float64(v)
+			if value > max {
+				max = value
+			}
+			input[i] = value
+		}
+		for i := range input {
+			input[i] /= float64(max)
+		}
+		output := fft.FFTReal(input)
+		for i := range output {
+			output[i] /= complex(float64(len(output)), 0)
+
+		}
 	}
 
 	size := len(prices[0]) + 1
