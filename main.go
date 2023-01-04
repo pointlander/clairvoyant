@@ -8,9 +8,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/cmplx"
 	"math/rand"
 	"net/http"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/mjibson/go-dsp/fft"
@@ -19,6 +21,7 @@ import (
 	"gonum.org/v1/plot/vg"
 	"gonum.org/v1/plot/vg/draw"
 
+	"github.com/pointlander/gradient/tc128"
 	"github.com/pointlander/gradient/tf32"
 )
 
@@ -36,10 +39,40 @@ type Candles struct {
 // APIKey is the api key for finnhub
 var APIKey = os.Getenv("KEY")
 
+// SphericalSoftmax is the spherical softmax function
+// https://arxiv.org/abs/1511.05042
+func SphericalSoftmax(k tc128.Continuation, node int, a *tc128.V, options ...map[string]interface{}) bool {
+	const E = complex(0, 0)
+	c, size, width := tc128.NewV(a.S...), len(a.X), a.S[0]
+	values, sums, row := make([]complex128, width), make([]complex128, a.S[1]), 0
+	for i := 0; i < size; i += width {
+		sum := complex(0, 0)
+		for j, ax := range a.X[i : i+width] {
+			values[j] = ax*ax + E
+			sum += values[j]
+		}
+		for _, cx := range values {
+			c.X = append(c.X, (cx+E)/sum)
+		}
+		sums[row] = sum
+		row++
+	}
+	if k(&c) {
+		return true
+	}
+	// (2 a (b^2 + c^2 + d^2 + 0.003))/(a^2 + b^2 + c^2 + d^2 + 0.004)^2
+	for i, d := range c.D {
+		ax, sum := a.X[i], sums[i/width]
+		//a.D[i] += d*(2*ax*(sum-(ax*ax+E)))/(sum*sum) - d*cx*2*ax/sum
+		a.D[i] += d * (2 * ax * (sum - (ax*ax + E))) / (sum * sum)
+	}
+	return false
+}
+
 func main() {
 	rand.Seed(1)
 
-	symbols, prices := []string{"AAPL", "IBM", "CTVA", "K", "CAT", "GS", "T", "WMT"}, make([][]float32, 0, 8)
+	symbols, prices, outputs := []string{"AAPL", "IBM", "CTVA", "K", "CAT", "GS", "T", "WMT"}, make([][]float32, 0, 8), make([][]complex128, 0, 8)
 	for _, symbol := range symbols {
 		stock := Prices(symbol)
 		fmt.Println(symbol, len(stock))
@@ -58,9 +91,29 @@ func main() {
 		output := fft.FFTReal(input)
 		for i := range output {
 			output[i] /= complex(float64(len(output)), 0)
-
 		}
+		outputs = append(outputs, output)
 	}
+
+	width, length := len(outputs[0]), len(outputs)
+	others := tc128.NewSet()
+	others.Add("input", width, 1)
+	input := others.ByName["input"]
+	input.X = input.X[:cap(input.X)]
+
+	// Create the weight data matrix
+	x := tc128.NewSet()
+	x.Add("points", width, length)
+	point := x.ByName["points"]
+	for _, v := range outputs {
+		point.X = append(point.X, v...)
+	}
+
+	// The neural network is the attention model from attention is all you need
+	spherical := tc128.U(SphericalSoftmax)
+	al1 := spherical(tc128.Mul(x.Get("points"), others.Get("input")))
+	al2 := spherical(tc128.T(tc128.Mul(al1, tc128.T(x.Get("points")))))
+	acost := tc128.Entropy(al2)
 
 	size := len(prices[0]) + 1
 	set := tf32.NewSet()
@@ -188,6 +241,30 @@ func main() {
 	for i := size - 1; i < len(w.X); i += size {
 		fmt.Println(symbols[index], w.X[i-1], w.X[i])
 		index++
+	}
+
+	type Stock struct {
+		Symbol  string
+		Entropy float64
+	}
+	stocks := make([]Stock, 0, len(symbols))
+	for i := 0; i < len(outputs); i++ {
+		// Load the input
+		copy(input.X, outputs[i])
+		// Calculate the l1 output of the neural network
+		acost(func(a *tc128.V) bool {
+			stocks = append(stocks, Stock{
+				Symbol:  symbols[i],
+				Entropy: cmplx.Abs(a.X[0]),
+			})
+			return true
+		})
+	}
+	sort.Slice(stocks, func(i, j int) bool {
+		return stocks[i].Entropy > stocks[j].Entropy
+	})
+	for _, stock := range stocks {
+		fmt.Printf("%4s %f\n", stock.Symbol, stock.Entropy)
 	}
 
 	p := plot.New()
