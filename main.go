@@ -173,10 +173,7 @@ func main() {
 		index++
 	}
 
-	p, err := plot.New()
-	if err != nil {
-		panic(err)
-	}
+	p := plot.New()
 
 	p.Title.Text = "epochs vs cost"
 	p.X.Label.Text = "epochs"
