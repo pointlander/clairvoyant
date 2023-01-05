@@ -241,7 +241,14 @@ func main() {
 		return
 	}
 
-	symbols, inputs := []string{"AAPL", "IBM", "CTVA", "K", "CAT", "GS", "T", "WMT"}, make([][]complex128, 0, 8)
+	type Stock struct {
+		Symbol  string
+		Entropy float64
+		Phase   float64
+		Prices  []float32
+		FFT     []complex128
+	}
+	symbols, stocks := []string{"AAPL", "IBM", "CTVA", "K", "CAT", "GS", "T", "WMT", "MSFT", "AMZN"}, make([]Stock, 0, 8)
 	for _, symbol := range symbols {
 		stock := Prices(symbol)
 		fmt.Println(symbol, len(stock))
@@ -260,10 +267,14 @@ func main() {
 		for i := range output {
 			output[i] /= complex(float64(len(output)), 0)
 		}
-		inputs = append(inputs, output)
+		stocks = append(stocks, Stock{
+			Symbol: symbol,
+			Prices: stock,
+			FFT:    output,
+		})
 	}
 
-	width, length := len(inputs[0]), len(inputs)
+	width, length := len(stocks[0].Prices), len(stocks)
 	others := tc128.NewSet()
 	others.Add("input", width, 1)
 	input := others.ByName["input"]
@@ -273,8 +284,8 @@ func main() {
 	x := tc128.NewSet()
 	x.Add("points", width, length)
 	point := x.ByName["points"]
-	for _, v := range inputs {
-		point.X = append(point.X, v...)
+	for _, v := range stocks {
+		point.X = append(point.X, v.FFT...)
 	}
 
 	// The neural network is the attention model from attention is all you need
@@ -283,20 +294,13 @@ func main() {
 	l2 := spherical(tc128.T(tc128.Mul(l1, tc128.T(x.Get("points")))))
 	cost := tc128.Entropy(l2)
 
-	type Stock struct {
-		Symbol  string
-		Entropy float64
-	}
-	stocks := make([]Stock, 0, len(symbols))
-	for i := 0; i < len(inputs); i++ {
+	for i := 0; i < len(stocks); i++ {
 		// Load the input
-		copy(input.X, inputs[i])
+		copy(input.X, stocks[i].FFT)
 		// Calculate the l1 output of the neural network
 		cost(func(a *tc128.V) bool {
-			stocks = append(stocks, Stock{
-				Symbol:  symbols[i],
-				Entropy: cmplx.Abs(a.X[0]),
-			})
+			stocks[i].Entropy = cmplx.Abs(a.X[0])
+			stocks[i].Phase = cmplx.Phase(a.X[0])
 			return true
 		})
 	}
@@ -304,7 +308,7 @@ func main() {
 		return stocks[i].Entropy > stocks[j].Entropy
 	})
 	for _, stock := range stocks {
-		fmt.Printf("%4s %f\n", stock.Symbol, stock.Entropy)
+		fmt.Printf("%4s %f %f %f\n", stock.Symbol, stock.Entropy, stock.Phase, stock.Prices[0]-stock.Prices[len(stock.Prices)-1])
 	}
 }
 
