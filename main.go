@@ -5,6 +5,7 @@
 package main
 
 import (
+	"encoding/gob"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -36,6 +37,24 @@ type Candles struct {
 	Timestamp []json.Number `json:"t"`
 	Volume    []json.Number `json:"v"`
 }
+
+// Symbol is a stock symbol
+type Symbol struct {
+	Currency    string  `json:"currency"`
+	Description string  `json:"description"`
+	Display     string  `json:"displaySymbol"`
+	FIGI        *string `json:"figi"`
+	ISIN        *string `json:"isin"`
+	MIC         *string `json:"mic"`
+	ShareClass  *string `json:"shareClassFIGI"`
+	Symbol      *string `json:"symbol"`
+	Symbol2     *string `json:"symbol2"`
+	Type        *string `json:"type"`
+	Prices      []float32
+}
+
+// Symbols is a list of stock symbols
+type Symbols []Symbol
 
 // APIKey is the api key for finnhub
 var APIKey = os.Getenv("KEY")
@@ -230,6 +249,8 @@ func Original() {
 var (
 	// Original is the original mode
 	FlagOriginal = flag.Bool("original", false, "original mode")
+	// FlagFetch fetch stock data
+	FlagFetch = flag.Bool("fetch", false, "fetch stock data")
 )
 
 func main() {
@@ -238,6 +259,47 @@ func main() {
 
 	if *FlagOriginal {
 		Original()
+		return
+	}
+
+	if *FlagFetch {
+		url := fmt.Sprintf("https://finnhub.io/api/v1/stock/symbol?exchange=US&token=%s", APIKey)
+		client := http.Client{}
+		request, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			panic(err)
+		}
+
+		resp, err := client.Do(request)
+		if err != nil {
+			panic(err)
+		}
+		defer resp.Body.Close()
+
+		var result Symbols
+		json.NewDecoder(resp.Body).Decode(&result)
+		fmt.Println(len(result))
+		length := float64(len(result))
+		fmt.Println(length*length*16/(1024*1024*1024), "GB")
+		sort.Slice(result, func(i, j int) bool {
+			return *result[i].Symbol < *result[j].Symbol
+		})
+		fmt.Println(length*1.5/(60*60*24), "days")
+		for i := range result {
+			time.Sleep(1500 * time.Millisecond)
+			result[i].Prices = Prices(*result[i].Symbol)
+			fmt.Println(len(result[i].Prices), *result[i].Symbol)
+		}
+		output, err := os.Create("symbols.bin")
+		if err != nil {
+			panic(err)
+		}
+		defer output.Close()
+		encoder := gob.NewEncoder(output)
+		err = encoder.Encode(result)
+		if err != nil {
+			panic(err)
+		}
 		return
 	}
 
@@ -328,6 +390,7 @@ func Prices(symbol string) []float32 {
 	if err != nil {
 		fmt.Println(err)
 	}
+	defer resp.Body.Close()
 
 	var result Candles
 	json.NewDecoder(resp.Body).Decode(&result)
