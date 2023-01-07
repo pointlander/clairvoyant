@@ -391,7 +391,7 @@ func main() {
 		return stocks[i].Entropy > stocks[j].Entropy
 	})
 	for _, stock := range stocks {
-		change := (stock.Prices[len(stock.Prices)-1] - stock.Prices[0]) / stock.Prices[len(stock.Prices)-1]
+		change := (stock.Prices[len(stock.Prices)-1] - stock.Prices[0]) / stock.Prices[0]
 		fmt.Printf("%5s % 11.7f % 11.7f % 11.7f %s\n", stock.Symbol, stock.Entropy, stock.Phase, change, stock.Name)
 	}
 }
