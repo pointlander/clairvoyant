@@ -303,17 +303,37 @@ func main() {
 		return
 	}
 
+	inputs, err := os.Open("symbols.bin")
+	if err != nil {
+		panic(err)
+	}
+	defer inputs.Close()
+	decoder := gob.NewDecoder(inputs)
+	var symbols Symbols
+	err = decoder.Decode(&symbols)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("symbols", len(symbols))
+
 	type Stock struct {
 		Symbol  string
+		Name    string
 		Entropy float64
 		Phase   float64
 		Prices  []float32
 		FFT     []complex128
 	}
-	symbols, stocks := []string{"AAPL", "IBM", "CTVA", "K", "CAT", "GS", "T", "WMT", "MSFT", "AMZN"}, make([]Stock, 0, 8)
+	stocks := make([]Stock, 0, 8)
 	for _, symbol := range symbols {
-		stock := Prices(symbol)
-		fmt.Println(symbol, len(stock))
+		stock := symbol.Prices
+		if len(stock) < 251 {
+			continue
+		}
+		if len(stock) == 252 {
+			stock = stock[:251]
+		}
+		//fmt.Println(*symbol.Symbol, len(stock))
 		input, max := make([]float64, len(stock)), 0.0
 		for i, v := range stock {
 			value := float64(v)
@@ -330,7 +350,8 @@ func main() {
 			output[i] /= complex(float64(len(output)), 0)
 		}
 		stocks = append(stocks, Stock{
-			Symbol: symbol,
+			Symbol: *symbol.Symbol,
+			Name:   symbol.Description,
 			Prices: stock,
 			FFT:    output,
 		})
@@ -370,7 +391,7 @@ func main() {
 		return stocks[i].Entropy > stocks[j].Entropy
 	})
 	for _, stock := range stocks {
-		fmt.Printf("%4s %f %f %f\n", stock.Symbol, stock.Entropy, stock.Phase, stock.Prices[len(stock.Prices)-1]-stock.Prices[0])
+		fmt.Printf("%5s % 11.7f % 11.7f % 11.7f %s\n", stock.Symbol, stock.Entropy, stock.Phase, stock.Prices[len(stock.Prices)-1]-stock.Prices[0], stock.Name)
 	}
 }
 
