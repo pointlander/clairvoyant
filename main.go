@@ -346,8 +346,10 @@ func main() {
 			input[i] /= float64(max)
 		}
 		output := fft.FFTReal(input)
+		length := float64(len(output))
 		for i := range output {
-			output[i] /= complex(float64(len(output)), 0)
+			mag, phase := cmplx.Polar(output[i])
+			output[i] = cmplx.Rect(mag/length, phase)
 		}
 		stocks = append(stocks, Stock{
 			Symbol: *symbol.Symbol,
