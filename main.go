@@ -390,10 +390,16 @@ func main() {
 	sort.Slice(stocks, func(i, j int) bool {
 		return stocks[i].Entropy > stocks[j].Entropy
 	})
-	for _, stock := range stocks {
+	max, last, index := float32(0.0), (stocks[0].Prices[len(stocks[0].Prices)-1]-stocks[0].Prices[0])/stocks[0].Prices[0], 0
+	for i, stock := range stocks {
 		change := (stock.Prices[len(stock.Prices)-1] - stock.Prices[0]) / stock.Prices[0]
+		if last-change > max {
+			index, max = i, last-change
+		}
 		fmt.Printf("%5s % 11.7f % 11.7f % 11.7f %s\n", stock.Symbol, stock.Entropy, stock.Phase, change, stock.Name)
 	}
+	stock := stocks[index]
+	fmt.Printf("%5s % 11.7f % 11.7f %s\n", stock.Symbol, stock.Entropy, stock.Phase, stock.Name)
 }
 
 // Prices returns the prices of the stock symbol
